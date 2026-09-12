@@ -1,4 +1,9 @@
-"""Active project API — get/set the currently active project."""
+"""Active project API — get/set the currently active project.
+
+This front-half branch also exposes a TEMPORARY local-only netlog sink used to
+capture Flow's batchexecute wire shape from a real UI action. It intentionally
+stores no headers, cookies, CSRF tokens, or auth credentials.
+"""
 import json
 import logging
 import os
@@ -13,6 +18,7 @@ router = APIRouter(prefix="/api/active-project", tags=["active-project"])
 logger = logging.getLogger(__name__)
 
 _STATE_FILE = Path(__file__).parent.parent / "active_project.json"
+_NETLOG_FILE = Path(__file__).parent.parent.parent / "scratch" / "flow-netlog.jsonl"
 
 
 def _read_state() -> dict | None:
@@ -120,3 +126,51 @@ async def clear_active_project():
     """Clear the active project (revert to fallback behavior)."""
     _clear_state()
     return {"status": "cleared", "message": "Active project cleared. Will use most recent project as fallback."}
+
+
+# ─── TEMP Flow batchexecute wire recorder ───────────────────
+# Evidence only. This is intentionally local, bounded, and contains no request
+# headers/cookies/auth. Remove after the current Flow RPC contract is identified.
+
+@router.post("/netlog")
+async def append_flow_netlog(body: dict):
+    allowed = {
+        "ts": body.get("ts"),
+        "path": body.get("path"),
+        "rpcids": body.get("rpcids"),
+        "f_req": body.get("f_req"),
+        "status_code": body.get("status_code"),
+        "response_text": body.get("response_text"),
+        "response_truncated": bool(body.get("response_truncated", False)),
+    }
+    # Keep accidental payload growth bounded even if Flow changes dramatically.
+    if isinstance(allowed["f_req"], str):
+        allowed["f_req"] = allowed["f_req"][:500_000]
+    if isinstance(allowed["response_text"], str):
+        allowed["response_text"] = allowed["response_text"][:250_000]
+
+    _NETLOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(_NETLOG_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(allowed, ensure_ascii=False) + "\n")
+    return {"ok": True, "path": str(_NETLOG_FILE), "rpcids": allowed["rpcids"]}
+
+
+@router.get("/netlog")
+async def read_flow_netlog(limit: int = 20):
+    if not _NETLOG_FILE.exists():
+        return {"path": str(_NETLOG_FILE), "count": 0, "items": []}
+    lines = _NETLOG_FILE.read_text(encoding="utf-8").splitlines()
+    items = []
+    for line in lines[-max(1, min(limit, 100)):]:
+        try:
+            items.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return {"path": str(_NETLOG_FILE), "count": len(lines), "items": items}
+
+
+@router.delete("/netlog")
+async def clear_flow_netlog():
+    if _NETLOG_FILE.exists():
+        _NETLOG_FILE.unlink()
+    return {"ok": True, "path": str(_NETLOG_FILE)}
