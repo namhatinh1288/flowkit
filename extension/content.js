@@ -1,4 +1,7 @@
-/** Content script bridge for Flow Kit. */
+/**
+ * Content script — bridge between background.js and injected.js
+ * Injects injected.js into MAIN world to access window.grecaptcha
+ */
 (function () {
   const s = document.createElement('script');
   s.src = chrome.runtime.getURL('injected.js');
@@ -8,7 +11,9 @@
 
 chrome.runtime.onMessage.addListener((msg, _, reply) => {
   if (msg.type !== 'GET_CAPTCHA') return;
+
   const { requestId, pageAction } = msg;
+
   const handler = (e) => {
     if (e.detail?.requestId === requestId) {
       window.removeEventListener('CAPTCHA_RESULT', handler);
@@ -16,25 +21,29 @@ chrome.runtime.onMessage.addListener((msg, _, reply) => {
       reply({ token: e.detail.token, error: e.detail.error });
     }
   };
+
   const timer = setTimeout(() => {
     window.removeEventListener('CAPTCHA_RESULT', handler);
     reply({ error: 'CONTENT_TIMEOUT' });
   }, 25000);
+
   window.addEventListener('CAPTCHA_RESULT', handler);
-  window.dispatchEvent(new CustomEvent('GET_CAPTCHA', { detail: { requestId, pageAction } }));
-  return true;
+
+  window.dispatchEvent(new CustomEvent('GET_CAPTCHA', {
+    detail: { requestId, pageAction },
+  }));
+
+  return true; // keep channel open for async reply
 });
 
-window.addEventListener('FLOW_NETLOG', (e) => {
-  fetch('http://127.0.0.1:8100/api/active-project/netlog', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(e.detail || {}),
-  }).catch(() => {});
-});
-
+// ─── TRPC Media URL Monitor ─────────────────────────────────
+// Forward intercepted TRPC responses with media URLs to background.js
 window.addEventListener('TRPC_MEDIA_URLS', (e) => {
   const { url, body } = e.detail || {};
   if (!body) return;
-  chrome.runtime.sendMessage({ type: 'TRPC_MEDIA_URLS', trpcUrl: url, body }).catch(() => {});
+  chrome.runtime.sendMessage({
+    type: 'TRPC_MEDIA_URLS',
+    trpcUrl: url,
+    body,
+  }).catch(() => {});
 });
