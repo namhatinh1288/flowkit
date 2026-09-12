@@ -1,7 +1,4 @@
-/**
- * Content script — bridge between background.js and injected.js
- * Injects injected.js into MAIN world to access window.grecaptcha
- */
+/** Content script bridge for Flow Kit. */
 (function () {
   const s = document.createElement('script');
   s.src = chrome.runtime.getURL('injected.js');
@@ -11,9 +8,7 @@
 
 chrome.runtime.onMessage.addListener((msg, _, reply) => {
   if (msg.type !== 'GET_CAPTCHA') return;
-
   const { requestId, pageAction } = msg;
-
   const handler = (e) => {
     if (e.detail?.requestId === requestId) {
       window.removeEventListener('CAPTCHA_RESULT', handler);
@@ -21,43 +16,25 @@ chrome.runtime.onMessage.addListener((msg, _, reply) => {
       reply({ token: e.detail.token, error: e.detail.error });
     }
   };
-
   const timer = setTimeout(() => {
     window.removeEventListener('CAPTCHA_RESULT', handler);
     reply({ error: 'CONTENT_TIMEOUT' });
   }, 25000);
-
   window.addEventListener('CAPTCHA_RESULT', handler);
-
-  window.dispatchEvent(new CustomEvent('GET_CAPTCHA', {
-    detail: { requestId, pageAction },
-  }));
-
-  return true; // keep channel open for async reply
+  window.dispatchEvent(new CustomEvent('GET_CAPTCHA', { detail: { requestId, pageAction } }));
+  return true;
 });
 
-// ─── Temporary Flow batchexecute recorder ──────────────────
-// injected.js runs in MAIN world and can see the exact fetch used by Flow's UI.
-// It emits only f.req/rpcids/status/bounded response text — no cookies, headers,
-// CSRF `at` token, or auth credentials. Keep the evidence local and delete it
-// after the wire contract has been identified.
 window.addEventListener('FLOW_NETLOG', (e) => {
-  const detail = e.detail || {};
-  fetch('http://127.0.0.1:8100/api/flow/netlog', {
+  fetch('http://127.0.0.1:8100/api/active-project/netlog', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(detail),
+    body: JSON.stringify(e.detail || {}),
   }).catch(() => {});
 });
 
-// ─── TRPC Media URL Monitor ─────────────────────────────────
-// Forward intercepted TRPC responses with media URLs to background.js
 window.addEventListener('TRPC_MEDIA_URLS', (e) => {
   const { url, body } = e.detail || {};
   if (!body) return;
-  chrome.runtime.sendMessage({
-    type: 'TRPC_MEDIA_URLS',
-    trpcUrl: url,
-    body,
-  }).catch(() => {});
+  chrome.runtime.sendMessage({ type: 'TRPC_MEDIA_URLS', trpcUrl: url, body }).catch(() => {});
 });
