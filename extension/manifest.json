@@ -20,7 +20,7 @@
     "http://127.0.0.1:8100/*"
   ],
   "background": {
-    "service_worker": "background_capture.js"
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {
