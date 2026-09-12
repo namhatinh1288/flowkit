@@ -155,7 +155,7 @@ async function captureTokenFromFlowTab() {
   const tabs = await chrome.tabs.query({ url: flowUrls });
   if (!tabs.length) {
     if (_openingFlowTab) {
-      console.log('[FlowAgent] Flow tab already opening, skipping');
+      console.log('[FlowAgent] No Flow tab found — opening one in background');
       return;
     }
     _openingFlowTab = true;
@@ -480,8 +480,15 @@ async function runBatchRpc(cmd) {
       const bl = wiz.cfb2h;
       if (!at) return { error: 'NO_AT_TOKEN' };
       const reqid = Math.floor(Math.random() * 900000) + 100000;
+      // Flow account profiles are routed under /u/<n> (for example /u/2).
+      // The UI posts batchexecute to that account-scoped path. Posting to the
+      // accountless root can still return HTTP 200 but without the requested
+      // wrb.fr envelope, which looks like the RPC disappeared. Preserve the
+      // current page's account prefix when present.
+      const accountPrefix = globalThis.location?.pathname?.match(/^\/u\/\d+(?=\/|$)/)?.[0] || '';
+      const batchPath = `${accountPrefix}/_/AiSandboxAngularFrontend/data/batchexecute`;
       const url =
-        `/_/AiSandboxAngularFrontend/data/batchexecute?rpcids=${encodeURIComponent(rpcid)}` +
+        `${batchPath}?rpcids=${encodeURIComponent(rpcid)}` +
         `&f.sid=${encodeURIComponent(sid || '')}&bl=${encodeURIComponent(bl || '')}` +
         `&hl=en-AU&_reqid=${reqid}&rt=c`;
       const resp = await fetch(url, {
