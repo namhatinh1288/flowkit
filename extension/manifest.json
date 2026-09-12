@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Flow Kit",
   "version": "0.3.0",
-  "description": "Local agent bridge for Google Flow \u2014 runs batchexecute RPCs inside a signed-in flow.google.com tab, mints reCAPTCHA, proxies API calls",
+  "description": "Local agent bridge for Google Flow — runs batchexecute RPCs inside a signed-in flow.google.com tab, mints reCAPTCHA, proxies API calls",
   "permissions": [
     "storage",
     "alarms",
@@ -20,7 +20,7 @@
     "http://127.0.0.1:8100/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background_capture.js"
   },
   "content_scripts": [
     {
