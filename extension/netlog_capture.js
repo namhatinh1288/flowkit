@@ -9,7 +9,10 @@
  * Remove this file and restore manifest.json after the wire contract is fixed.
  */
 
-const FLOW_NETLOG_FILTER = { urls: ['https://flow.google.com/_/*'] };
+// Match every request on flow.google.com, then narrow by pathname below.
+// Some accounts are routed through /u/<n>/... URLs, so filtering only /_/* can
+// miss UI requests before we even get a chance to inspect them.
+const FLOW_NETLOG_FILTER = { urls: ['https://flow.google.com/*'] };
 const flowNetlogPending = new Map();
 
 function redactLongJsonStrings(value) {
@@ -24,33 +27,60 @@ function redactLongJsonStrings(value) {
 }
 
 function sanitizeFReq(fReq) {
+  if (Array.isArray(fReq)) fReq = fReq[0];
   if (typeof fReq !== 'string' || !fReq) return null;
   try {
     const parsed = JSON.parse(fReq);
     return JSON.stringify(redactLongJsonStrings(parsed));
   } catch {
-    // If Flow ever stops sending JSON here, do not persist opaque raw data.
     return '__UNPARSEABLE_F_REQ__';
   }
 }
 
 function extractFReq(details) {
   try {
+    // Chrome exposes application/x-www-form-urlencoded bodies as formData on
+    // some builds, while others leave the original bytes under raw. Support both.
+    const formData = details.requestBody?.formData;
+    if (formData && Object.prototype.hasOwnProperty.call(formData, 'f.req')) {
+      const fromForm = sanitizeFReq(formData['f.req']);
+      if (fromForm) return fromForm;
+    }
+
     const raw = details.requestBody?.raw;
-    if (!raw?.length || !raw[0]?.bytes) return null;
-    const text = new TextDecoder().decode(new Uint8Array(raw[0].bytes));
-    const params = new URLSearchParams(text);
-    return sanitizeFReq(params.get('f.req'));
-  } catch {
-    return null;
-  }
+    if (raw?.length) {
+      const chunks = [];
+      for (const part of raw) {
+        if (part?.bytes) chunks.push(new Uint8Array(part.bytes));
+      }
+      if (chunks.length) {
+        let total = 0;
+        for (const chunk of chunks) total += chunk.length;
+        const merged = new Uint8Array(total);
+        let offset = 0;
+        for (const chunk of chunks) {
+          merged.set(chunk, offset);
+          offset += chunk.length;
+        }
+        const text = new TextDecoder().decode(merged);
+        const params = new URLSearchParams(text);
+        const fromRaw = sanitizeFReq(params.get('f.req'));
+        if (fromRaw) return fromRaw;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function isFlowBatchPath(pathname) {
+  return pathname.includes('/AiSandboxAngularFrontend/data/batchexecute');
 }
 
 chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
     try {
       const url = new URL(details.url);
-      if (!url.pathname.includes('/_/AiSandboxAngularFrontend/data/batchexecute')) return;
+      if (!isFlowBatchPath(url.pathname)) return;
       const fReq = extractFReq(details);
       if (!fReq) return;
       flowNetlogPending.set(details.requestId, {
