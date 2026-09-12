@@ -36,6 +36,20 @@ chrome.runtime.onMessage.addListener((msg, _, reply) => {
   return true; // keep channel open for async reply
 });
 
+// ─── Temporary Flow batchexecute recorder ──────────────────
+// injected.js runs in MAIN world and can see the exact fetch used by Flow's UI.
+// It emits only f.req/rpcids/status/bounded response text — no cookies, headers,
+// CSRF `at` token, or auth credentials. Keep the evidence local and delete it
+// after the wire contract has been identified.
+window.addEventListener('FLOW_NETLOG', (e) => {
+  const detail = e.detail || {};
+  fetch('http://127.0.0.1:8100/api/flow/netlog', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(detail),
+  }).catch(() => {});
+});
+
 // ─── TRPC Media URL Monitor ─────────────────────────────────
 // Forward intercepted TRPC responses with media URLs to background.js
 window.addEventListener('TRPC_MEDIA_URLS', (e) => {
