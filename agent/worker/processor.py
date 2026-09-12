@@ -444,9 +444,16 @@ async def _handle_failure(rid: str, req: dict, result: dict, retry_after: dict =
 
     error_lower = str(error_msg).lower()
 
-    # A capability the batch path does not have, or a missing Flow project, is
-    # a configuration answer — not something a retry can reach. Fail it once.
-    if "unsupported_on_batch_api" in error_lower or "no_flow_project" in error_lower:
+    # Permanent configuration/quota answers cannot become successful by retrying
+    # the same account immediately. Fail once and let the caller retry manually
+    # after switching account/project or after quota reset.
+    non_retryable_markers = (
+        "unsupported_on_batch_api",
+        "no_flow_project",
+        "public_error_per_model_daily_quota_reached",
+        "public_error_user_quota_reached",
+    )
+    if any(marker in error_lower for marker in non_retryable_markers):
         await crud.update_request(rid, status="FAILED", error_message=str(error_msg))
         await _mark_scene_failed(req)
         logger.error("Request %s FAILED (not retryable): %s", rid[:8], error_msg)
